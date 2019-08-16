@@ -1,0 +1,698 @@
+---
+title: "Exploring Human Primary Samples"
+author: <a href="https://chela-james.github.io/"> <h3> Chela James </h3> </a> \newline Cancer Institute, UCL, UK
+date: 22 March 2019
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+    code_download: true
+    self_contained: true
+    keep_md: false
+    encoding: "UTF-8"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+htmltools::tagList(rmarkdown::html_dependency_font_awesome())
+knitr::opts_chunk$set(eval = TRUE, cache = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+```{r,  out.width = "100%", echo = FALSE, warning = FALSE}
+library(knitr)
+library(ggplot2)
+library(sva)
+library(dplyr)
+library(preprocessCore)
+library(ggrepel)
+library(Biobase)
+library(tibble)
+library(scater)
+library(gghighlight)
+library(annotables)
+library(DESeq2)
+library(fgsea)
+library(DT)
+```
+
+# Investigating Gautam's samples 
+
+In order to investigate the properties of a novel lympho-myeloid progenitor cell we isolated cells from early foetal liver
+
+# Transcriptional profile PCA and differential gene expression (DGA)
+
+## Sorting
+
+Isolated cells were sorted using a variety of cell markers
+
+## RNA-seq
+
+RNA was isolated and sequenced from the various cell types.
+
+## Sample summary
+
+```{r}
+sample_table <- read.delim('charlotta_simplified_table.tsv', stringsAsFactors = FALSE)
+
+rownames(sample_table) <- sample_table$Name
+sample_table$Name <- NULL
+sample_table$SampleID <- NULL
+sample_table$batch <- c(rep("nov_18", 27), rep("mar_19",32))
+sample_table$stage <- c("w12","w12","w10","w10","w10","CS19",
+                        "CS19","CS19","CB","CB","CB","CS16",
+                        "CS16","CB","CB","CB","w13","w13",
+                        "CS20","CS20","CS20","w8","w8","w8",
+                        "BM","BM","BM","BM","BM","BM","CS19"
+                        ,"CS19","BM","BM","BM","BM","BM","BM",
+                        "CB","CB","CB","CS2","CS2","CS2","CS2"
+                        ,"CS2","CS2","w13","w13","w13","CS23",
+                        "CS23","CS23","CS22","CS22","CS22",
+                        "w13","w13","w13")
+
+sample_table$diff_groups <- c(1,2,3,1,2,3,1,2,3,1,2,2,1,3,1,2,3,2,3,1,2,3,2,1,1,2,3,3,2,1,2,1,3,2,1,3,2,1,3,2,1,3,2,1,3,2,1,3,2,1,3,2,1,3,2,1,3,2,1)
+
+sample_table$pools <- c("W12_13","W12_13","W8_10","W8_10","W8_10","CS19_23","CS19_23","CS19_23","CB","CB","CB","CS16","CS16","CB","CB","CB","W12_13","W12_13","CS19_23","CS19_23","CS19_23","W8_10","W8_10","W8_10","BM","BM","BM","BM","BM","BM","CS19_23","CS19_23","BM","BM","BM","BM","BM","BM","CB","CB","CB","CS19_23","CS19_23","CS19_23","CS19_23","CS19_23","CS19_23","W12_13","W12_13","W12_13","CS19_23","CS19_23","CS19_23","CS19_23","CS19_23","CS19_23","W12_13","W12_13","W12_13")
+
+datatable(sample_table) %>% 
+  formatStyle("diff_groups", backgroundColor = styleEqual(c(1,2,3), c("#EAD3BF","#AA9486", "#B6854D"))) %>%
+  formatStyle("pools", backgroundColor = styleEqual(c("W12_13","CS19_23","CB","W8_10","BM","CS16"), c("#9986A5","#79402E", "#CCBA72","#F3DF6C","#D9D0D3","#8D8680")))
+
+```
+
+## PCA 
+
+### PCA 'All' working with FPKMS and [quantile normalization](http://genomicsclass.github.io/book/pages/normalization.html)
+
+```{r}
+
+#mar_22_19_fpkms <- read.delim('myriad/22_03_19_fpkms', header = TRUE, stringsAsFactors = FALSE ) 
+#nov_20_18_fpkms <- read.delim('20_nov_2018/myriad/20_nov_18_fpkms', header = TRUE, stringsAsFactors = FALSE )
+
+mar_22_19_fpkms <- readRDS("mar_22_19_fpkms.RDS")
+nov_20_18_fpkms <- readRDS("nov_20_18_fpkms.RDS")
+
+mar_22_19_fpkms<-dplyr::rename(mar_22_19_fpkms,
+                               BM_P5_11       = C23_N728_S505,
+                               BM_P10_11      = B04_N704_S503,
+                               BM_P12_11      = B06_N706_S503,
+                               CS19_P5_11     = B08_N710_S503,
+                               CS19_P12_11    = B12_N715_S503,
+                               BM1_P5_12      = B14_N718_S503,
+                               BM1_P10_12     = B16_N720_S503,
+                               BM1_P12_12     = B18_N722_S503,
+                               BM2_P5_12      = B20_N724_S503,
+                               BM2_P10_12     = B22_N727_S503,
+                               BM2_P12_12     = F20_N724_S508,
+                               CB_P5_12       = E23_N728_S507,
+                               CB_P10_12      = D04_N704_S506,
+                               CB_P12_12      = D06_N706_S506,
+                               CS22_P5_12     = D08_N710_S506,
+                               CS22_P10_12    = D10_N712_S506,
+                               CS22_P12_12    = D12_N715_S506,
+                               CS20_P5_12     = D14_N718_S506,
+                               CS20_P10_12    = D16_N720_S506,
+                               CS20_P12_12    = D18_N722_S506,
+                               FL13w_P5_13    = D20_N724_S506,
+                               FL13w_P10_13   = D22_N727_S506,
+                               FL13w_P12_13   = F22_N727_S508,
+                               CS23_P5_13     = G23_N728_S510,
+                               CS23_P10_13    = F04_N704_S508,
+                               CS23_P12_13    = F06_N706_S508,
+                               CS22_P5_19     = F08_N710_S508,
+                               CS22_P10_19    = F10_N712_S508,
+                               CS22_P12_19    = F12_N715_S508,
+                               w13_FL_P5_19   = F14_N718_S508,
+                               w13_FL_P10_19  = F16_N720_S508,
+                               w13_FL_P12_19  = F18_N722_S508)
+
+fpkms <- left_join(nov_20_18_fpkms,mar_22_19_fpkms, by = c("ensgene" = "ensgene" ))
+fpkms <- dplyr::rename(fpkms,symbol = symbol.x)
+fpkms$symbol.y <- NULL
+my_rows <- apply(fpkms[,3:length(colnames(fpkms))], 1, max) >=5;
+fpkms <- fpkms[my_rows,]
+fpkms <- fpkms[complete.cases(fpkms),]
+temp_fpkms <- fpkms[,3:61][,order(match(colnames(fpkms[,3:61]),rownames(sample_table)))]
+fpkms[,3:61]<-NULL
+fpkms <- cbind(fpkms,temp_fpkms)
+rm(temp_fpkms)
+fpkms_counts_only <- fpkms[,3:length(colnames(fpkms))]
+## Log transform the data
+log.data = log2(fpkms_counts_only+1)
+
+## Quantile normalization
+normalized.data = normalize.quantiles(as.matrix(log.data)) # A quantile normalization.
+
+## Copy the row and column names from data to data2:
+rownames(normalized.data) = fpkms$ensgene
+colnames(normalized.data) = colnames(fpkms[,3:length(colnames(fpkms))])
+
+## Transpose the matrix back for PCA
+normalized.data = t(normalized.data)
+
+fit <- prcomp(normalized.data)
+
+x="PC1"
+y="PC2"
+x.lab = paste(x, sprintf('(%0.1f%% explained var.)', 100 * fit$sdev[which(colnames(fit$x) == x)]^2/sum(fit$sdev^2)))
+y.lab = paste(y, sprintf('(%0.1f%% explained var.)', 100 * fit$sdev[which(colnames(fit$x) == y)]^2/sum(fit$sdev^2)))
+data <- data.frame(fit$x)
+data<-rownames_to_column(data, var = "sample")
+data<-left_join(data,rownames_to_column(sample_table, var = "sample_id"), by = c("sample" = "sample_id"))
+
+## =======================================================================
+## Preliminary PCA pre-batch normaliztion
+## =======================================================================
+pca_plot <- function(data) {
+fit <- prcomp(data)
+
+x="PC1"
+y="PC2"
+x.lab = paste(x, sprintf('(%0.1f%% explained var.)', 100 * fit$sdev[which(colnames(fit$x) == x)]^2/sum(fit$sdev^2)))
+y.lab = paste(y, sprintf('(%0.1f%% explained var.)', 100 * fit$sdev[which(colnames(fit$x) == y)]^2/sum(fit$sdev^2)))
+data <- data.frame(fit$x)
+data<-rownames_to_column(data, var = "sample")
+data<-left_join(data,rownames_to_column(sample_table, var = "sample_id"), by = c("sample" = "sample_id"))
+
+
+ggplot(data,aes(PC1,PC2,colour = batch,shape = Phenotype)) + 
+  geom_point(size = 2) + 
+  geom_label_repel(aes(label = sample),
+  size = 2,
+  box.padding   = 0.1, 
+  point.padding = 0.1,
+  segment.color = 'grey50') +
+  xlab(label = x.lab) +
+  ylab(label = y.lab) +
+  theme_minimal()
+}
+
+pca_plot(normalized.data)
+```
+
+
+### Why are they outliers?
+
+Some of them have overrepresented sequences?
+
+![overrepresented](overrepresented.png)
+
+```{r}
+ggplot(data,aes(PC1,PC2,colour = batch,shape = Phenotype)) + geom_point(size = 2)  + gghighlight(sample == "CS22_P10_12" | sample == "CS22_P12_12" | sample == "w13_FL_P12_19") + theme_minimal()
+```
+
+###Taking out the outliers
+
+```{r}
+my_samples<-data[data$PC1 < 0,]$sample
+normalized.data<-normalized.data[rownames(normalized.data) %in% my_samples,]
+
+pca_plot(normalized.data)
+
+```
+
+###Batch effect removal
+
+```{r}
+my_eset <- t(normalized.data)
+my_eset <- my_eset[!duplicated(rownames(my_eset)),]
+my_peset <-sample_table[rownames(sample_table) %in% colnames(my_eset),]
+my_eset  <- my_eset[,order(match(colnames(my_eset),rownames(my_peset)))]
+
+
+pd <- new("AnnotatedDataFrame", data=my_peset)
+my_eset <- ExpressionSet(assayData = my_eset, pd)
+
+pheno <- pData(my_eset)
+edata <- exprs(my_eset)
+
+batch=pheno$batch
+
+combat_edata1 = ComBat(dat=edata, batch=batch, mod=NULL, par.prior=TRUE, prior.plots=FALSE)
+combat_edata1 <- t(combat_edata1)
+pca_plot(combat_edata1)
+
+```
+
+####Repeat with IL7R
+
+```{r}
+il7_peset <- rownames_to_column(my_peset, var = "sample") %>% dplyr::filter( grepl("IL7R", Phenotype ))
+il7_eset <- my_eset[,which(colnames(my_eset) %in% il7_peset$sample)]
+
+pheno <- pData(il7_eset)
+edata <- exprs(il7_eset)
+
+batch=pheno$batch
+
+combat_edata1 = ComBat(dat=edata, batch=batch, mod=NULL, par.prior=TRUE, prior.plots=FALSE)
+combat_edata1 <- t(combat_edata1)
+
+pca_plot(combat_edata1)
+
+```
+
+
+### PCA without normalizing the FPKMs
+
+```{r}
+my_fpkms <- t(fpkms[,3:61])
+
+pca_plot(my_fpkms)
+
+```
+
+##PCA with counts
+###Using [scater](https://bioconductor.org/packages/release/bioc/html/scater.html) normalization 
+
+```{r}
+# mar_22_counts <- read.delim('myriad/big_counts')
+# nov_20_counts <- read.delim('20_nov_2018/myriad/big_counts')
+# 
+# big_counts <- left_join(rownames_to_column(nov_20_counts, "ensgene"),rownames_to_column(mar_22_counts,"ensgene"))
+# #matching names and orders
+# 
+# big_counts <- dplyr::rename(big_counts,
+#                                BM_P5_11       = C23_N728_S505,
+#                                BM_P10_11      = B04_N704_S503,
+#                                BM_P12_11      = B06_N706_S503,
+#                                CS19_P5_11     = B08_N710_S503,
+#                                CS19_P12_11    = B12_N715_S503,
+#                                BM1_P5_12      = B14_N718_S503,
+#                                BM1_P10_12     = B16_N720_S503,
+#                                BM1_P12_12     = B18_N722_S503,
+#                                BM2_P5_12      = B20_N724_S503,
+#                                BM2_P10_12     = B22_N727_S503,
+#                                BM2_P12_12     = F20_N724_S508,
+#                                CB_P5_12       = E23_N728_S507,
+#                                CB_P10_12      = D04_N704_S506,
+#                                CB_P12_12      = D06_N706_S506,
+#                                CS22_P5_12     = D08_N710_S506,
+#                                CS22_P10_12    = D10_N712_S506,
+#                                CS22_P12_12    = D12_N715_S506,
+#                                CS20_P5_12     = D14_N718_S506,
+#                                CS20_P10_12    = D16_N720_S506,
+#                                CS20_P12_12    = D18_N722_S506,
+#                                FL13w_P5_13    = D20_N724_S506,
+#                                FL13w_P10_13   = D22_N727_S506,
+#                                FL13w_P12_13   = F22_N727_S508,
+#                                CS23_P5_13     = G23_N728_S510,
+#                                CS23_P10_13    = F04_N704_S508,
+#                                CS23_P12_13    = F06_N706_S508,
+#                                CS22_P5_19     = F08_N710_S508,
+#                                CS22_P10_19    = F10_N712_S508,
+#                                CS22_P12_19    = F12_N715_S508,
+#                                w13_FL_P5_19   = F14_N718_S508,
+#                                w13_FL_P10_19  = F16_N720_S508,
+#                                w13_FL_P12_19  = F18_N722_S508)
+# 
+# 
+# temp_counts <- big_counts[,2:60][,order(match(colnames(big_counts[,2:60]),rownames(sample_table)))]
+# big_counts[2:60] <- NULL
+# big_counts <- cbind(big_counts,temp_counts)
+# 
+# saveRDS(big_counts,"big_counts.rds")
+
+big_counts <- readRDS('big_counts.rds')
+
+count_matrix <- as.matrix(big_counts[,2:length(colnames(big_counts))])
+colnames(count_matrix) <- rownames(sample_table)
+rownames(count_matrix) <- big_counts$ensgene
+
+sce <- SingleCellExperiment(list(counts = count_matrix),
+                            colData = sample_table)
+sce <- sce[rowSums(counts(sce)) >  0,]
+sce <- calculateQCMetrics(sce)
+
+```
+
+```{r}
+## prepare total count and total features data
+
+my_df <- data.frame("sample_id" <- colnames(sce), "total_counts" = sce$total_counts,
+                    "total_features" = sce$total_features_by_counts, "batch" = sce$batch )
+ggplot(my_df,aes(total_counts, fill = batch)) + geom_histogram(bins = 50) + 
+  theme_minimal() + ggtitle("Histogram of total counts") + ylab("number of samples") + xlab("total counts")
+```
+
+```{r}
+
+ggplot(my_df,aes(total_features, fill = batch)) + geom_histogram(bins = 50) + 
+  theme_minimal() + ggtitle("Histogram of total features") + ylab("number of samples") + xlab("total features")
+
+```
+
+
+###PCA without batch effect removal
+
+```{r}
+sizeFactors(sce) <- librarySizeFactors(sce)
+sce <- normalize(sce)
+
+sce <- runPCA(sce)
+
+data <- reducedDim(sce)
+percent_var_PC1<- paste("PC1", sprintf('(%0.1f%% explained var.)', attr(data, 'percentVar')[1] * 100 ))
+percent_var_PC2<- paste("PC2", sprintf('(%0.1f%% explained var.)', attr(data, 'percentVar')[2] * 100 ))
+
+data <- data.frame(data)
+data<-left_join(rownames_to_column(data), rownames_to_column(sample_table))
+
+ggplot(data,aes(PC1,PC2, colour = Phenotype, shape = batch )) + geom_point(size = 3 ) + 
+  geom_label_repel(aes(label = rowname), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') + theme_minimal() + xlab(percent_var_PC1) + ylab(percent_var_PC2)
+
+```
+
+
+###PCA with IL7R only
+
+```{r}
+
+sce <- sce[,grep("IL7R", sce$Phenotype)]
+
+sce <- runPCA(sce)
+
+data <- reducedDim(sce)
+percent_var_PC1<- paste("PC1", sprintf('(%0.1f%% explained var.)', attr(data, 'percentVar')[1] * 100 ))
+percent_var_PC2<- paste("PC2", sprintf('(%0.1f%% explained var.)', attr(data, 'percentVar')[2] * 100 ))
+
+data <- data.frame(data)
+data<-left_join(rownames_to_column(data), rownames_to_column(sample_table))
+
+ggplot(data,aes(PC1,PC2, colour = pools, shape = batch )) + geom_point(size = 3 ) + 
+  geom_label_repel(aes(label = rowname), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') + theme_minimal() + xlab(percent_var_PC1) + ylab(percent_var_PC2)
+
+```
+
+## DEseq2
+
+```{r}
+library(DESeq2)
+rownames(big_counts) <- big_counts$ensgene
+big_counts$ensgene <- NULL
+dds <- DESeqDataSetFromMatrix(big_counts, colData = sample_table, design = ~Phenotype)
+my_vst <- vst(dds)
+
+pcaData <- DESeq2::plotPCA(my_vst, intgroup =c("Phenotype","batch","stage","pools"),returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+
+ggplot(pcaData,aes(PC1,PC2,colour = Phenotype, shape = batch)) + geom_point(size = 3 ) +
+        xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+        ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+          geom_label_repel(aes(label = name), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') +
+        theme_minimal()
+
+```
+
+###Genes driving PC1 and PC2
+
+```{r}
+
+top_contribs = function(object) {
+  # calculate the variance for each gene
+  rv <- rowVars(assay(object))
+
+  # select the 1000 top genes by variance
+  select <- order(rv, decreasing=TRUE)[seq_len(min(1000, length(rv)))]
+
+  # perform a PCA on the data in assay(x) for the selected genes
+  pca <- prcomp(t(assay(object)[select,]))
+
+  # the contribution to the total variance for each component
+  percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
+
+  # Top 20 contributers to PC1 PC2
+  PCA1_contrib <- sort(abs(pca$rotation[,1]), decreasing = TRUE )[1:20]
+  PCA2_contrib <- sort(abs(pca$rotation[,2]), decreasing = TRUE )[1:20]
+  PCA_contrib <- c(PCA1_contrib, PCA2_contrib)
+  PCA_contrib <- data.frame("ensgene" = names(PCA_contrib), PCA_contrib)
+
+
+
+  PCA_contrib <- cbind(PCA_contrib, data.frame("PC" = c(rep("PC1",20),rep("PC2","20"))))
+  PCA_contrib <- left_join(PCA_contrib, grch38, by = "ensgene") %>% dplyr::select("PC","symbol", "biotype")
+  return(PCA_contrib)
+}
+
+datatable(top_contribs(my_vst))
+
+```
+
+
+###DESeq with IL7R only
+
+```{r}
+
+dds <- dds[,colData(dds)$PCA_only_IL7R == "yes"]
+
+
+my_vst <- vst(dds)
+
+pcaData <- DESeq2::plotPCA(my_vst, intgroup =c("Phenotype","batch","stage", "pools"),returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+
+ggplot(pcaData,aes(PC1,PC2,colour = pools, shape = Phenotype )) + geom_point(size = 3 ) +
+        xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+        ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+                  geom_label_repel(aes(label = name), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') +
+       theme_minimal() 
+
+```
+
+
+###Genes driving PC1 and PC2 (IL7 only)
+
+```{r}
+datatable(top_contribs(my_vst))
+```
+
+
+#Differential Gene Expression
+
+##IL7R+KIT w12_13 v BM
+
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 1 & ( sample_table$pools == "W12_13" | sample_table$pools == "BM"), ]
+
+run_deseq <- function(coldata,contrast1){
+counts <- big_counts[,colnames(big_counts) %in% rownames(coldata)]
+dds <- DESeqDataSetFromMatrix(counts, colData = coldata, design = ~batch + pools)
+
+deseq <- DESeq(dds)
+
+res <- results(deseq, contrast = c("pools", contrast1, "BM"))
+resOrdered <- res[order(res$padj),]
+resOrdered <- data.frame(resOrdered)
+resOrdered <- left_join(rownames_to_column(resOrdered, var = "ensgene"), grch38, by = "ensgene") %>% 
+  dplyr::select(symbol,log2FoldChange,padj,biotype)
+for_DT <- resOrdered[1:500,]
+return(list(res = resOrdered, for_Datatable = for_DT))
+}
+my_res <- run_deseq(coldata, "W12_13")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+
+hallmark <- gmtPathways("~/genome_apps/GSEA/h.all.v6.2.symbols.gmt")
+
+plot_gsea <- function(res){
+res <- res[complete.cases(res),]
+res$fcSign <- sign(res$log2FoldChange)
+res$logP <- -log10(res$padj)
+res$metric <- res$logP/res$fcSign
+y<-res[,c("symbol", "metric")]
+geneList <- y$metric
+names(geneList) <- y$symbol
+geneList <- geneList[order(geneList, decreasing = T)]
+fgseaRes <- fgsea(hallmark, geneList, nperm=10000, maxSize = 500)
+fgseaRes <- fgseaRes[fgseaRes$padj < 0.05,]
+plotGseaTable(hallmark[fgseaRes$pathway], geneList, fgseaRes, gseaParam = 0.4)
+}
+
+plot_gsea(my_res$res)
+```
+
+
+##IL7R+KIT w8_10 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 1 & ( sample_table$pools == "W8_10" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata, "W8_10")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+
+##IL7R+KIT CS19_23 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 1 & ( sample_table$pools == "CS19_23" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"CS19_23")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+
+##IL7R+KIT CB v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 1 & ( sample_table$pools == "CB" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata, "CB")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+
+##CD34+CD38-CD45RA- w12_13 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 2 & ( sample_table$pools == "W12_13" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata, "W12_13")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+##CD34+CD38-CD45RA- w8_10 v BM
+
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 2 & ( sample_table$pools == "W8_10" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"W8_10")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+##CD34+CD38-CD45RA- CS19_23 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 2 & ( sample_table$pools == "CS19_23" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata, "CS19_23")
+datatable(my_res$for_Datatable)
+```
+
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+##CD34+CD38-CD45RA- CB v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 2 & ( sample_table$pools == "CB" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"CB")
+datatable(my_res$for_Datatable)
+```
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+##CD34+CD19+ w12_13 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 3 & ( sample_table$pools == "W12_13" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata, "W12_13")
+datatable(my_res$for_Datatable)
+```
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+##CD34+CD19+ w8_10 v BM
+
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 3 & ( sample_table$pools == "W8_10" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"W8_10")
+datatable(my_res$for_Datatable)
+```
+
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+
+##CD34+CD19+ CS19_23 v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 3 & ( sample_table$pools == "CS19_23" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"CS19_23")
+datatable(my_res$for_Datatable)
+```
+
+```{r}
+plot_gsea(my_res$res)
+```
+
+
+##CD34+CD19+ CB v BM
+
+```{r}
+coldata <- sample_table[sample_table$diff_groups == 3 & ( sample_table$pools == "CB" | sample_table$pools == "BM"), ]
+
+my_res <- run_deseq(coldata,"CB")
+datatable(my_res$for_Datatable)
+```
+
+```{r}
+plot_gsea(my_res$res)
+
+```
+

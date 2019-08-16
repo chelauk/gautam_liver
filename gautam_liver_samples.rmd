@@ -1,0 +1,200 @@
+---
+title: "Exploring Human Primary Samples"
+author: <a href="https://chela-james.github.io/"> <h3> Chela James </h3> </a> \newline Cancer Institute, UCL, UK
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+htmltools::tagList(rmarkdown::html_dependency_font_awesome())
+knitr::opts_chunk$set(eval = TRUE, cache = FALSE, out.width = "100%",
+                      warning = FALSE, message = FALSE)
+```
+
+
+```{r libraries }
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+library(Biobase)
+library(tibble)
+library(annotables)
+library(DESeq2)
+library(fgsea)
+library(DT)
+library("BiocParallel")
+register(MulticoreParam(4))
+```
+
+# Gautam's samples 
+
+Investigating liver samples
+
+# Transcriptional profile PCA and differential gene expression (DGE)
+
+## RNA-seq
+
+RNA was isolated and sequenced from the various cell types.
+
+## Sample summary
+
+```{r}
+sample_table <- read.delim('sample_index.txt', stringsAsFactors = FALSE)
+
+datatable(sample_table) %>% 
+  formatStyle("species", backgroundColor = styleEqual(c("Human","Mouse"), c("#EAD3BF","#AA9486"))) %>%
+  formatStyle("condition", backgroundColor = styleEqual(c("CONTROL","LIVER FAILURE"), c("#9986A5","#79402E")))
+
+```
+
+## Human
+### PCA
+
+```{r}
+counts <- read.delim('human_counts', stringsAsFactors = FALSE)
+
+human_coldata <- sample_table %>% dplyr::filter(species == "Human")
+rownames(human_coldata) <-  human_coldata$sample_id
+human_coldata$sample_id <- NULL
+dds <- DESeqDataSetFromMatrix(counts, colData = human_coldata, design = ~condition)
+
+my_vst <- vst(dds)
+pcaData <- plotPCA(my_vst, intgroup ="condition",returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData,aes(PC1,PC2,colour = condition)) + geom_point(size = 3 ) +
+        xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+        ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+          geom_label_repel(aes(label = name), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') +
+        theme_minimal()
+
+```
+
+### Genes driving PC1 and PC2
+
+```{r}
+top_contribs = function(object,my_genome) {
+  # calculate the variance for each gene
+  rv <- rowVars(assay(object))
+
+  # select the 1000 top genes by variance
+  select <- order(rv, decreasing=TRUE)[seq_len(min(1000, length(rv)))]
+
+  # perform a PCA on the data in assay(x) for the selected genes
+  pca <- prcomp(t(assay(object)[select,]))
+
+  # the contribution to the total variance for each component
+  percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
+
+  # Top 20 contributers to PC1 PC2
+  PCA1_contrib <- sort(abs(pca$rotation[,1]), decreasing = TRUE )[1:20]
+  PCA2_contrib <- sort(abs(pca$rotation[,2]), decreasing = TRUE )[1:20]
+  PCA_contrib <- c(PCA1_contrib, PCA2_contrib)
+  PCA_contrib <- data.frame("ensgene" = names(PCA_contrib), PCA_contrib)
+  PCA_contrib <- cbind(PCA_contrib, data.frame("PC" = c(rep("PC1",20),rep("PC2","20"))))
+  PCA_contrib <- left_join(PCA_contrib, my_genome, by = "ensgene") %>% dplyr::select("PC","symbol", "biotype")
+  return(PCA_contrib)
+}
+
+datatable(top_contribs(my_vst,grch38))
+
+```
+
+### Differential Gene Expression
+
+```{r}
+deseq <- DESeq(dds, parallel = TRUE)
+
+res <- results(deseq, contrast = c("condition", "LIVER FAILURE", "CONTROL"))
+resOrdered <- res[order(res$padj),]
+resOrdered <- data.frame(resOrdered)
+resOrdered <- left_join(rownames_to_column(resOrdered, var = "ensgene"), grch38, by = "ensgene") %>% 
+  dplyr::select(symbol,log2FoldChange,padj,biotype)
+ # for_DT <- resOrdered[1:2000,]
+
+datatable(resOrdered, 
+          extensions = 'Buttons', options = list(
+    dom = 'Bfrtip',
+    buttons = c('excel', 'pdf', 'print')
+  ))
+```
+
+### GSEA
+
+```{r}
+
+hallmark <- gmtPathways("h.all.v6.2.symbols.gmt")
+
+plot_gsea <- function(res){
+res <- res[complete.cases(res),]
+res$fcSign <- sign(res$log2FoldChange)
+res$logP <- -log10(res$padj)
+res$metric <- res$logP/res$fcSign
+y<-res[,c("symbol", "metric")]
+geneList <- y$metric
+names(geneList) <- y$symbol
+geneList <- geneList[order(geneList, decreasing = T)]
+fgseaRes <- fgsea(hallmark, geneList, nperm=10000, maxSize = 500)
+fgseaRes <- fgseaRes[fgseaRes$padj < 0.0005,]
+plotGseaTable(hallmark[fgseaRes$pathway], geneList, fgseaRes, gseaParam = 0.4)
+}
+
+plot_gsea(resOrdered)
+```
+
+## Mouse
+### PCA
+
+```{r}
+counts <- read.delim('mouse_counts', stringsAsFactors = FALSE)
+
+mouse_coldata <- sample_table %>% dplyr::filter(species == "Mouse")
+rownames(mouse_coldata) <-  mouse_coldata$sample_id
+mouse_coldata$sample_id <- NULL
+dds <- DESeqDataSetFromMatrix(counts, colData = mouse_coldata, design = ~condition)
+
+my_vst <- vst(dds)
+
+pcaData <- DESeq2::plotPCA(my_vst, intgroup ="condition",returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData,aes(PC1,PC2,colour = condition)) + geom_point(size = 3 ) +
+        xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+        ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+          geom_label_repel(aes(label = name), size = 2,box.padding   = 0.1,point.padding = 0.1,
+                   segment.color = 'grey50') +
+        theme_minimal()
+
+```
+
+### Genes driving PC1 and PC2
+
+```{r}
+datatable(top_contribs(my_vst,grcm38))
+```
+
+### Differential Gene Expression
+
+
+```{r}
+deseq <- DESeq(dds, parallel = TRUE)
+res <- results(deseq, contrast = c("condition", "LIVER FAILURE", "CONTROL"))
+resOrdered <- res[order(res$padj),]
+resOrdered <- data.frame(resOrdered)
+resOrdered <- left_join(rownames_to_column(resOrdered, var = "ensgene"), grcm38, by = "ensgene") %>% 
+  dplyr::select(symbol,log2FoldChange,padj,biotype)
+#for_DT <- resOrdered[1:2000,]
+
+datatable(resOrdered, 
+          extensions = 'Buttons', options = list(
+    dom = 'Bfrtip',
+    buttons = c('excel', 'pdf', 'print')
+  ))
+```
+
+
